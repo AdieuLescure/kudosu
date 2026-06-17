@@ -1,0 +1,17 @@
+{
+  "name": "sudoku-duel",
+  "version": "1.0.0",
+  "description": "Sudoku 1v1 en temps reel avec timer, IA et salons partageables",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}
