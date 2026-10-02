@@ -272,13 +272,19 @@ function slim(it) {
   return { id: it.id, title: it.title, desc: it.desc, type: it.type, img: it.img, views: it.views };
 }
 
+// Mode rapide (--quick) : listes reduites (les pages les plus connues) pour tester vite.
+const QUICK = process.argv.includes('--quick');
+const top = (rows, k) => (QUICK ? rows.slice().sort((a, b) => b.n - a.n).slice(0, k) : rows);
+
 async function main() {
   fs.mkdirSync(OUT, { recursive: true });
+  if (QUICK) log('MODE RAPIDE : listes reduites');
 
-  const frPeopleRows = await francePeople();
-  const frEventRows = await franceEvents();
-  const wEventRows = await worldEvents();
-  const vital = await vitalPeopleTitles();
+  const frPeopleRows = top(await francePeople(), 250);
+  const frEventRows = top(await franceEvents(), 100);
+  const wEventRows = top(await worldEvents(), 150);
+  let vital = await vitalPeopleTitles();
+  if (QUICK) vital = vital.filter((_, i) => i % Math.ceil(vital.length / 300) === 0);
 
   log('Resolution des titres fr.wikipedia...');
   const frPeopleRes = await resolveQids([...new Set(frPeopleRows.map((r) => r.qid))]);
