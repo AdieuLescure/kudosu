@@ -22,7 +22,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const MIN_VIEWS = 5000;
+const MIN_VIEWS = 10000;
 const TIERLIST_SIZE = 50;
 const UA = process.env.WIKI_USER_AGENT || 'WikiDuel/1.0 (https://github.com/adieulescure/kudosu)';
 const ROOT = path.join(__dirname, '..');
@@ -38,7 +38,7 @@ async function getJson(url, accept) {
   for (let attempt = 0; attempt < 10; attempt++) {
     let res;
     try {
-      res = await fetch(url, { headers: { 'User-Agent': UA, Accept: accept || 'application/json' } });
+      res = await fetch(url, { headers: { 'User-Agent': UA, Accept: accept || 'application/json' }, signal: AbortSignal.timeout(120000) });
     } catch (e) {
       await sleep(Math.min(60000, 3000 * 2 ** attempt));
       continue;
