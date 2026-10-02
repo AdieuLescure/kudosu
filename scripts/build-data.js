@@ -61,7 +61,7 @@ async function cached(key, fn) {
   const file = path.join(CACHE, crypto.createHash('md5').update(key).digest('hex') + '.json');
   if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8'));
   const value = await fn();
-  fs.writeFileSync(file, JSON.stringify(value));
+  if (value !== undefined) fs.writeFileSync(file, JSON.stringify(value));
   return value;
 }
 
@@ -165,6 +165,17 @@ function chunk(arr, size) {
   return out;
 }
 
+// wbgetentities avec quelques essais ; undefined si l'API ne renvoie pas d'entites.
+async function wikidataEntities(params) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const res = await api('www.wikidata.org', params);
+    if (res.entities) { await sleep(1000); return res.entities; }
+    log('  wbgetentities sans resultat : ' + JSON.stringify(res.error || res).slice(0, 160));
+    await sleep(5000 * (attempt + 1));
+  }
+  return undefined;
+}
+
 function readEntities(entities, into) {
   for (const e of Object.values(entities || {})) {
     if (!e || e.missing !== undefined || !e.sitelinks || !e.sitelinks.frwiki) continue;
@@ -180,12 +191,10 @@ async function resolveQids(qids) {
   const found = {};
   for (const ids of chunk(qids, 50)) {
     const r = await cached('qids:' + ids.join(','), async () => {
-      const res = await api('www.wikidata.org', {
+      return wikidataEntities({
         action: 'wbgetentities', ids: ids.join('|'), props: 'sitelinks|descriptions',
         sitefilter: 'frwiki', languages: 'fr'
       });
-      await sleep(1000);
-      return res.entities;
     });
     readEntities(r, found);
   }
@@ -196,12 +205,10 @@ async function resolveEnTitles(titles) {
   const found = {};
   for (const batch of chunk(titles, 50)) {
     const r = await cached('entitles:' + batch.join('|'), async () => {
-      const res = await api('www.wikidata.org', {
-        action: 'wbgetentities', sites: 'enwiki', titles: batch.join('|'), normalize: '1',
+      return wikidataEntities({
+        action: 'wbgetentities', sites: 'enwiki', titles: batch.join('|'),
         props: 'sitelinks|descriptions', sitefilter: 'frwiki', languages: 'fr'
       });
-      await sleep(1000);
-      return res.entities;
     });
     readEntities(r, found);
   }
