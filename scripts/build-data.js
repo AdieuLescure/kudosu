@@ -225,13 +225,28 @@ async function fetchStats(items) {
   for (const batch of batches) {
     i++;
     if (i % 10 === 1) log('Vues Wikipedia : lot ' + i + '/' + batches.length);
-    const r = await cached('stats:' + batch.join('|'), async () => {
-      const res = await api('fr.wikipedia.org', {
-        action: 'query', prop: 'pageviews|pageimages', pvipdays: '60', piprop: 'thumbnail', pithumbsize: '480',
-        titles: batch.join('|'), redirects: '1'
-      });
-      await sleep(1200);
-      return res.query;
+    const r = await cached('stats2:' + batch.join('|'), async () => {
+      // L'API pagine les vues/images : on suit "continue" jusqu'au bout.
+      const pages = new Map();
+      const redirects = [];
+      const normalized = [];
+      let cont = {};
+      do {
+        const res = await api('fr.wikipedia.org', Object.assign({
+          action: 'query', prop: 'pageviews|pageimages', pvipdays: '60', piprop: 'thumbnail', pithumbsize: '480',
+          titles: batch.join('|'), redirects: '1'
+        }, cont));
+        const q = res.query || {};
+        for (const pg of q.pages || []) {
+          const prev = pages.get(pg.pageid != null ? pg.pageid : pg.title) || {};
+          pages.set(pg.pageid != null ? pg.pageid : pg.title, Object.assign(prev, pg));
+        }
+        redirects.push(...(q.redirects || []));
+        normalized.push(...(q.normalized || []));
+        cont = res.continue;
+        await sleep(1200);
+      } while (cont);
+      return { pages: [...pages.values()], redirects, normalized };
     });
     const redirect = new Map((r.redirects || []).map((x) => [x.to, x.from]));
     const normal = new Map((r.normalized || []).map((x) => [x.to, x.from]));
