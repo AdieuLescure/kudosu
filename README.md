@@ -1,44 +1,34 @@
-# Sudoku Duel
+# Wiki Duel
 
-Duel de grilles **en temps reel, de 2 a 5 joueurs**. Interface minimaliste,
-100% responsive (desktop + mobile), pensee pour un deploiement en un clic sur
-**Render** via GitHub.
+Deux jeux à faire entre amis, basés sur des pages Wikipedia très consultées
+(**plus de 5 000 vues par mois** sur fr.wikipedia, via l'API Wikimedia).
 
-## Les modes
+On te demande un **pseudo** en arrivant sur le site.
 
-### CLASSIQUE — Sudoku 9×9
-- Choix de la **difficulte** (Facile / Moyen / Difficile / Expert) et du
-  **format** (1 manche, ou premier a 2 manches gagnantes).
-- Tous les joueurs recoivent **la meme grille**. Le **premier a terminer** la
-  grille remporte la manche.
-- Une erreur **bloque ton ecran pendant 10 s** (decompte affiche), puis tu reprends.
+## Les jeux
 
-### JEUX RAPIDES
-- A l'arrivee : choisis si le match se gagne en finissant **3 ou 5 grilles**, et
-  **active/desactive les jeux** du tirage.
-- Jeux disponibles : **Queens** (croix posees automatiquement autour des
-  couronnes), **Tango**, **Zip**, **Sudoku 6×6**.
-- A chaque manche, une grille est **tiree au sort** parmi les jeux choisis (sans
-  repetition immediate). La sequence et les grilles sont **identiques pour tous**.
-- Chacun **enchaine sa file de grilles a son rythme** ; le **premier au bout de
-  toute la sequence gagne**.
-- Erreur : **blocage de 5 s** sur Sudoku 6×6 et Queens. Pas de penalite sur Tango
-  et Zip.
-- Aucune difficulte a regler sur ces mini-jeux.
+### Duel (en ligne, 2 à 8 joueurs)
+- Un salon avec un code (ou un lien d'invitation à envoyer à tes amis).
+- À chaque manche : **2 pages Wikipedia** et toujours la même question :
+  **« Qu'est-ce qui marquera le plus le monde ? »**
+- Chacun choisit en secret. Quand tout le monde a répondu, on **révèle** qui a
+  choisi quoi, avec les vues mensuelles des deux pages. Pas de score.
+- L'hôte règle **Monde** (personnalités et événements du monde entier) ou
+  **France** (uniquement des personnalités et événements français) et le
+  nombre de manches (5 / 10 / 15).
+- Récap de fin de partie avec le pourcentage d'accord entre joueurs, et
+  « Rejouer » dans le même salon.
+- Un rechargement de la page ne te sort pas de la partie.
 
-## Commun a tous les jeux
-- **Saisie clavier** (desktop) : chiffres, fleches, Backspace pour effacer, `n`
-  pour le mode notes.
-- **Annotations** : bouton « Notes ». Quand un chiffre est place, les annotations
-  de ce chiffre sur la meme ligne / colonne / boite disparaissent.
-- **Decompte de 3 s** au lancement du match.
-- **Barres de progression** : la tienne + celle du **meneur** adverse (ou du 2e
-  si tu es en tete), avec son nom.
-- **Thème clair / sombre** + petite icone pour changer la **couleur principale**.
-- A la fin de la partie : bouton **Rejouer** qui ramene tout le monde dans le
-  **meme salon**, sans recreer de code.
+### Tier list (solo, sans limite de temps)
+- Les **50 personnalités françaises les plus connues**, à ranger de S à F
+  (touche une personnalité puis la ligne, ou glisse-la).
+- Ton brouillon est gardé dans le navigateur ; quand tout est classé, tu
+  enregistres.
+- L'onglet **Historique** montre toutes les tier lists enregistrées (pseudo,
+  date, classement).
 
-## Lancer en local (optionnel, necessite Node 18+)
+## Lancer en local (Node 18+)
 
 ```bash
 npm install
@@ -46,30 +36,78 @@ npm start
 # http://localhost:3000
 ```
 
-## Deployer sur Render
+Sans Supabase, l'historique est stocké dans `data/tierlists.local.json`
+(pratique pour tester, mais effacé à chaque redéploiement sur Render).
 
-1. Pousse ce dossier sur un depot **GitHub**.
-2. Sur [Render](https://render.com) : **New → Web Service**, connecte le depot.
-3. Render lit `render.yaml` automatiquement (sinon : Build `npm install`, Start `npm start`).
-4. Une fois en ligne, l'URL publique sert le jeu **et** les salons temps reel.
+## Les listes de pages (`data/`)
 
-> Plan gratuit Render : le service s'endort apres inactivite. Le premier
-> chargement peut prendre ~30 s, le temps que le service se reveille.
+Les pages sont dans `data/world.json`, `data/france.json` et
+`data/tierlist.json`. Elles sont **construites à l'avance** pour que le jeu soit
+rapide et ne dépende pas de Wikipedia en direct :
 
-## Pile technique
+```bash
+npm run build-data
+```
 
-- **Node + Express** : sert le front statique.
-- **Socket.io** : salons et synchro temps reel.
-- Front **vanilla** (HTML/CSS/JS), aucun build.
+Le script (`scripts/build-data.js`) :
+1. récupère des candidats : événements (Wikidata), personnalités françaises
+   (Wikidata), personnalités mondiales (articles « vitaux » de Wikipedia) ;
+2. interroge l'API Wikimedia pour les **vues des 30 derniers jours** sur
+   fr.wikipedia et ne garde que les pages à **5 000 vues/mois ou plus** ;
+3. choisit pour la tier list les 50 personnalités françaises présentes dans le
+   plus de langues Wikipedia (avec photo).
+
+Il peut durer 20 à 30 minutes (l'API demande d'aller doucement). Un cache
+(`scripts/.cache`) permet de reprendre après une coupure. Pour rafraîchir les
+vues, relance la commande puis commite `data/`.
+Pour changer la tier list à la main, modifie `data/tierlist.json`.
+
+## Historique permanent avec Supabase
+
+Render gratuit efface ses fichiers à chaque redéploiement : pour garder
+l'historique, on le stocke dans une base **Supabase** (gratuit).
+
+1. Crée un compte sur [supabase.com](https://supabase.com) puis **New project**
+   (nom au choix, choisis un mot de passe, région « West EU / Paris » si dispo).
+   Attends 1-2 minutes que le projet soit prêt.
+2. Menu **SQL Editor → New query** : colle le contenu de
+   [`supabase/schema.sql`](supabase/schema.sql) puis **Run**. Ça crée la table
+   `tierlists`.
+3. Menu **Project Settings → API** (ou « API Keys ») et note :
+   - **Project URL** (ex. `https://abcd1234.supabase.co`)
+   - la clé **`service_role`** (⚠ secrète : ne la mets jamais dans le code ni
+     sur GitHub ; elle ne sert que côté serveur).
+4. Sur **Render** → ton service → **Environment** → ajoute :
+   - `SUPABASE_URL` = ton Project URL
+   - `SUPABASE_SERVICE_KEY` = ta clé `service_role`
+
+   Render redéploie tout seul. Au démarrage, les logs affichent
+   `Historique : Supabase`.
+
+Pour tester en local avec Supabase :
+`SUPABASE_URL=... SUPABASE_SERVICE_KEY=... npm start`.
+
+## Déployer sur Render
+
+1. Pousse ce dépôt sur GitHub (c'est déjà le cas).
+2. Sur [Render](https://render.com) : **New → Web Service**, connecte le dépôt.
+   `render.yaml` est lu automatiquement (sinon : Build `npm install`, Start
+   `npm start`).
+3. Ajoute les variables Supabase (ci-dessus).
+4. L'URL publique sert le site **et** les salons temps réel.
+
+> Plan gratuit : le service s'endort après inactivité ; le premier chargement
+> peut prendre ~30 s. Ouvre le site avant de jouer pour le réveiller.
 
 ## Structure
 
 ```
-server.js          serveur + salons (2-5 joueurs) + modes classique / rapide
-public/
-  index.html       ecrans (accueil, config, salon, jeu)
-  styles.css       themes clair/sombre, responsive, animations
-  app.js           logique client + moteur de jeu (un controleur par jeu)
-  games.js         generateurs : sudoku 9/6, Queens, Tango, Zip (cote serveur)
-render.yaml        config de deploiement Render
+server.js              serveur Express + Socket.io (salons du Duel, API tier list)
+lib/store.js           historique des tier lists (Supabase ou fichier local)
+public/                site (HTML/CSS/JS, sans build)
+  app.js               pseudo, onglets          duel.js        jeu Duel
+  tierlist.js          tier list                history.js     historique
+data/                  listes de pages Wikipedia (générées)
+scripts/build-data.js  construit data/ depuis les API Wikimedia
+supabase/schema.sql    table de l'historique
 ```

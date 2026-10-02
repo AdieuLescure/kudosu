@@ -1,36 +1,130 @@
 /* ============================================================================
- *  Sudoku Duel — serveur Express + Socket.io
+ *  Wiki Duel — serveur Express + Socket.io
  *
- *  Deux modes de jeu :
- *   - 'classic' : sudoku 9x9, en manches (best-of 1 ou 3). Le premier a finir
- *                 la grille remporte la manche.
- *   - 'rapid'   : "Jeux rapides". Une sequence de N grilles (3 ou 5) tirees au
- *                 sort parmi les jeux choisis (sans repetition immediate). Tous
- *                 les joueurs recoivent la meme sequence et les memes grilles ;
- *                 le premier a terminer toute la sequence gagne.
+ *  Deux jeux :
+ *   - Duel : a chaque manche, 2 pages Wikipedia ; chaque joueur choisit celle qui
+ *            "marquera le plus le monde". Pas de score : on revele les choix de
+ *            tous, plus les vues mensuelles des pages. Version Monde ou France.
+ *   - Tier list : les 50 personnalites francaises les plus connues, classees
+ *            seul, sans limite de temps, puis enregistrees dans l'historique.
  *
- *  Erreurs : gerees cote client (blocage d'ecran + decompte). Le serveur ne
- *  relaie que la progression (0..1) pour les barres, et l'ordre d'arrivee.
- *
- *  De 2 a 5 joueurs par salon. Fin de partie -> retour au salon pour rejouer.
+ *  Les pages viennent de data/*.json (construits par scripts/build-data.js,
+ *  uniquement des pages a 5000+ vues/mois).
  * ========================================================================== */
 
 const path = require('path');
+const fs = require('fs');
 const http = require('http');
 const express = require('express');
 const { Server } = require('socket.io');
-const Games = require('./public/games.js');
+const store = require('./lib/store');
 
 const app = express();
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 const io = new Server(server);
 
+const DATA = process.env.DATA_DIR || path.join(__dirname, 'data');
+const MIN_VIEWS = 5000;
+
+function loadPool(name) {
+  try {
+    const items = JSON.parse(fs.readFileSync(path.join(DATA, name + '.json'), 'utf8'));
+    return items.filter((it) => it.views >= MIN_VIEWS);
+  } catch (e) {
+    console.warn('Liste manquante : data/' + name + '.json (lance `npm run build-data`)');
+    return [];
+  }
+}
+
+const POOLS = { world: loadPool('world'), france: loadPool('france') };
+const TIERLIST_ITEMS = loadPool('tierlist');
+const TIERS = ['S', 'A', 'B', 'C', 'D', 'F'];
+
+app.use(express.json({ limit: '50kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/health', (req, res) => res.send('ok'));
 
-const MAX_PLAYERS = 5;
+// --- Utilitaires ---------------------------------------------------------------
 
-/** @type {Map<string, Room>} */
+function cleanName(name) {
+  return String(name || '').replace(/[\u0000-\u001f\u007f<>]/g, '').trim().slice(0, 20);
+}
+
+const wikiUrl = (title) => 'https://fr.wikipedia.org/wiki/' + encodeURIComponent(title.replace(/ /g, '_'));
+
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// --- API : tier list ------------------------------------------------------------
+
+app.get('/api/tierlist/items', (req, res) => {
+  res.json({
+    tiers: TIERS,
+    items: TIERLIST_ITEMS.map((it) => ({ id: it.id, title: it.title, desc: it.desc, img: it.img, url: wikiUrl(it.title) }))
+  });
+});
+
+app.get('/api/tierlists', async (req, res) => {
+  try {
+    res.json({ persistent: store.useSupabase, tierlists: await store.list(100) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Historique indisponible.' });
+  }
+});
+
+const postLog = new Map(); // ip -> timestamps
+function tooMany(ip) {
+  const now = Date.now();
+  const recent = (postLog.get(ip) || []).filter((t) => now - t < 3600e3);
+  recent.push(now);
+  postLog.set(ip, recent);
+  return recent.length > 20;
+}
+
+app.post('/api/tierlists', async (req, res) => {
+  if (tooMany(req.ip)) return res.status(429).json({ error: 'Trop de tier lists, reessaie plus tard.' });
+  const name = cleanName(req.body && req.body.name);
+  const input = req.body && req.body.tiers;
+  if (!name) return res.status(400).json({ error: 'Pseudo manquant.' });
+  if (!input || typeof input !== 'object') return res.status(400).json({ error: 'Tier list invalide.' });
+
+  const byId = new Map(TIERLIST_ITEMS.map((it) => [it.id, it]));
+  const seen = new Set();
+  const tiers = {};
+  for (const tier of TIERS) {
+    const ids = Array.isArray(input[tier]) ? input[tier] : [];
+    tiers[tier] = [];
+    for (const id of ids) {
+      const item = byId.get(id);
+      if (!item || seen.has(id)) return res.status(400).json({ error: 'Tier list invalide.' });
+      seen.add(id);
+      tiers[tier].push({ id: item.id, t: item.title });
+    }
+  }
+  if (seen.size !== TIERLIST_ITEMS.length) return res.status(400).json({ error: 'Il faut classer toutes les personnalites.' });
+
+  try {
+    res.json({ ok: true, entry: await store.add(name, tiers) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Impossible d\'enregistrer pour le moment.' });
+  }
+});
+
+// --- Duel : salons ----------------------------------------------------------------
+
+const MAX_PLAYERS = 8;
+const ROUND_CHOICES = [5, 10, 15];
+
+/** @type {Map<string, any>} */
 const rooms = new Map();
 
 function makeRoomCode() {
@@ -43,227 +137,242 @@ function makeRoomCode() {
   return code;
 }
 
-function publicPlayers(room) {
-  return room.players.map((p) => ({
-    id: p.id, name: p.name, score: p.score, connected: p.connected
-  }));
+const validPlayerId = (id) => typeof id === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(id);
+
+function publicItem(it) {
+  return { id: it.id, title: it.title, desc: it.desc, img: it.img, type: it.type, url: wikiUrl(it.title) };
 }
 
-// Retire les infos sensibles selon le jeu (solution non envoyee pour les jeux
-// sans penalite, ou la validation se fait par regles cote client).
-function sanitizeGrid(grid) {
-  const g = Object.assign({}, grid);
-  if (g.type === 'tango') delete g.solution;
-  if (g.type === 'zip') delete g.solutionPath;
-  return g;
-}
-
-// Construit une sequence de `target` grilles pour le mode rapide.
-function buildSequence(games, target) {
-  const pool = (games && games.length) ? games.slice() : Games.RAPID_GAMES.slice();
-  const seq = [];
-  let last = null;
-  for (let i = 0; i < target; i++) {
-    let choices = pool.filter((g) => g !== last);
-    if (!choices.length) choices = pool.slice();
-    const gid = choices[Math.floor(Math.random() * choices.length)];
-    last = gid;
-    const grid = Games.generate(gid, {});
-    if (grid) seq.push({ gameId: gid, grid });
-  }
-  return seq;
-}
-
-function resetRoundState(room) {
-  room.players.forEach((p) => { p.progress = 0; p.done = false; });
-  room.finishOrder = [];
-  room.resolved = false;
-}
-
-// Demarre une partie (ou la manche suivante en classique).
-function startMatch(room, isNextRound) {
-  resetRoundState(room);
-
-  if (room.mode === 'rapid') {
-    room.round = 1;
-    room.sequence = buildSequence(room.config.games, room.config.target);
-  } else {
-    room.round = isNextRound ? room.round + 1 : 1;
-    const grid = Games.generate('sudoku9', { difficulty: room.config.difficulty });
-    room.sequence = [{ gameId: 'sudoku9', grid }];
-  }
-
-  const payload = {
-    mode: room.mode,
-    round: room.round,
-    target: room.mode === 'rapid' ? room.config.target : (room.config.bestOf === 3 ? 2 : 1),
-    sequence: room.sequence.map((s) => ({ gameId: s.gameId, grid: sanitizeGrid(s.grid) })),
-    players: publicPlayers(room)
+// Vue d'un salon pour un joueur donne (le client se redessine entierement depuis ca).
+function snapshot(room, playerId) {
+  const snap = {
+    code: room.code,
+    pool: room.pool,
+    rounds: room.rounds,
+    hostId: room.hostId,
+    me: playerId,
+    players: room.players.map((p) => ({ id: p.id, name: p.name, connected: p.connected })),
+    state: room.state,
+    phase: room.phase,
+    index: room.index,
+    round: null,
+    recap: null
   };
+  if (room.state === 'playing') {
+    const cur = room.history[room.index];
+    const reveal = room.phase === 'reveal';
+    snap.round = {
+      options: cur.pair.map((it) => (reveal ? Object.assign(publicItem(it), { views: it.views }) : publicItem(it))),
+      myChoice: cur.choices[playerId] === undefined ? null : cur.choices[playerId],
+      answered: Object.keys(cur.choices),
+      choices: reveal ? cur.choices : null
+    };
+  }
+  if (room.state === 'ended') snap.recap = buildRecap(room);
+  return snap;
+}
 
-  room.state = 'countdown';
-  // Decompte de 3s uniquement au debut du match (pas entre les manches).
-  if (isNextRound) {
-    room.state = 'playing';
-    io.to(room.code).emit('play:start', payload);
-  } else {
-    io.to(room.code).emit('countdown', { seconds: 3 });
-    setTimeout(() => {
-      if (!rooms.has(room.code)) return;
-      room.state = 'playing';
-      io.to(room.code).emit('play:start', payload);
-    }, 3000);
+function buildRecap(room) {
+  const rounds = room.history.map((h) => ({
+    options: h.pair.map((it) => Object.assign(publicItem(it), { views: it.views })),
+    choices: h.choices
+  }));
+  // Pourcentage d'accord entre chaque paire de joueurs (pas de score : juste de quoi debattre).
+  const agreements = [];
+  for (let i = 0; i < room.players.length; i++) {
+    for (let j = i + 1; j < room.players.length; j++) {
+      const a = room.players[i], b = room.players[j];
+      let both = 0, same = 0;
+      for (const h of room.history) {
+        if (h.choices[a.id] !== undefined && h.choices[b.id] !== undefined) {
+          both++;
+          if (h.choices[a.id] === h.choices[b.id]) same++;
+        }
+      }
+      if (both) agreements.push({ a: a.id, b: b.id, percent: Math.round((same / both) * 100) });
+    }
+  }
+  return { rounds, agreements };
+}
+
+function broadcast(room) {
+  room.updatedAt = Date.now();
+  for (const p of room.players) {
+    if (p.socketId && p.connected) io.to(p.socketId).emit('state', snapshot(room, p.id));
   }
 }
 
-function endMatch(room, winnerId) {
-  room.state = 'matchend';
-  io.to(room.code).emit('match:end', {
-    winnerId,
-    players: publicPlayers(room)
-  });
+// Revele la manche si tous les joueurs connectes ont repondu.
+function maybeReveal(room) {
+  if (room.state !== 'playing' || room.phase !== 'picking') return;
+  const cur = room.history[room.index];
+  const connected = room.players.filter((p) => p.connected);
+  if (connected.length && connected.every((p) => cur.choices[p.id] !== undefined)) room.phase = 'reveal';
+}
+
+function startGame(room) {
+  const pool = shuffle(POOLS[room.pool]);
+  room.history = [];
+  for (let i = 0; i < room.rounds; i++) room.history.push({ pair: [pool[2 * i], pool[2 * i + 1]], choices: {} });
+  room.index = 0;
+  room.state = 'playing';
+  room.phase = 'picking';
+}
+
+function findRoomOf(socket) {
+  const room = rooms.get(socket.data.roomCode);
+  if (!room) return {};
+  const player = room.players.find((p) => p.id === socket.data.playerId);
+  return player ? { room, player } : {};
+}
+
+function attach(socket, room, player) {
+  player.socketId = socket.id;
+  player.connected = true;
+  socket.join(room.code);
+  socket.data.roomCode = room.code;
+  socket.data.playerId = player.id;
 }
 
 io.on('connection', (socket) => {
 
-  socket.on('room:create', ({ name, mode, config }, cb) => {
-    const code = makeRoomCode();
-    mode = mode === 'rapid' ? 'rapid' : 'classic';
-    const safeConfig = mode === 'rapid'
-      ? {
-          target: config && config.target === 5 ? 5 : 3,
-          games: (config && Array.isArray(config.games) && config.games.length)
-            ? config.games.filter((g) => Games.RAPID_GAMES.indexOf(g) >= 0)
-            : Games.RAPID_GAMES.slice()
-        }
-      : {
-          difficulty: (config && config.difficulty) || 'moyen',
-          bestOf: config && config.bestOf === 3 ? 3 : 1
-        };
-    if (mode === 'rapid' && !safeConfig.games.length) safeConfig.games = Games.RAPID_GAMES.slice();
-
+  socket.on('room:create', ({ name, playerId }, cb) => {
+    name = cleanName(name);
+    if (!name || !validPlayerId(playerId)) return cb({ ok: false, error: 'Pseudo invalide.' });
+    if (POOLS.world.length < 30 || POOLS.france.length < 30) {
+      return cb({ ok: false, error: 'Les listes de pages ne sont pas encore construites sur le serveur.' });
+    }
     const room = {
-      code, mode, config: safeConfig,
-      players: [{ id: socket.id, name: (name || 'Joueur 1').slice(0, 16), score: 0, connected: true, progress: 0, done: false }],
-      hostId: socket.id,
-      state: 'lobby',
-      round: 0, sequence: [], finishOrder: [], resolved: false
+      code: makeRoomCode(), pool: 'world', rounds: 10, hostId: playerId,
+      players: [{ id: playerId, name, socketId: socket.id, connected: true }],
+      state: 'lobby', phase: 'picking', index: 0, history: [], updatedAt: Date.now()
     };
-    rooms.set(code, room);
-    socket.join(code);
-    socket.data.roomCode = code;
-    cb({ ok: true, code, mode, config: safeConfig, hostId: room.hostId, players: publicPlayers(room) });
+    rooms.set(room.code, room);
+    attach(socket, room, room.players[0]);
+    cb({ ok: true, code: room.code });
+    broadcast(room);
   });
 
-  socket.on('room:join', ({ name, code }, cb) => {
-    code = (code || '').toUpperCase().trim();
+  socket.on('room:join', ({ name, playerId, code }, cb) => {
+    name = cleanName(name);
+    code = String(code || '').toUpperCase().trim();
+    if (!name || !validPlayerId(playerId)) return cb({ ok: false, error: 'Pseudo invalide.' });
     const room = rooms.get(code);
     if (!room) return cb({ ok: false, error: 'Salon introuvable.' });
-    if (room.players.length >= MAX_PLAYERS) return cb({ ok: false, error: 'Salon complet (5 max).' });
-    if (room.state !== 'lobby' && room.state !== 'matchend') return cb({ ok: false, error: 'Partie en cours.' });
-
-    room.players.push({
-      id: socket.id, name: (name || ('Joueur ' + (room.players.length + 1))).slice(0, 16),
-      score: 0, connected: true, progress: 0, done: false
-    });
-    socket.join(code);
-    socket.data.roomCode = code;
-    cb({ ok: true, code, mode: room.mode, config: room.config, hostId: room.hostId, players: publicPlayers(room) });
-    io.to(code).emit('room:update', { players: publicPlayers(room), hostId: room.hostId });
+    let player = room.players.find((p) => p.id === playerId);
+    if (!player) {
+      if (room.state === 'playing') return cb({ ok: false, error: 'Partie deja en cours.' });
+      if (room.players.length >= MAX_PLAYERS) return cb({ ok: false, error: 'Salon complet.' });
+      player = { id: playerId, name, socketId: socket.id, connected: true };
+      room.players.push(player);
+    }
+    attach(socket, room, player);
+    cb({ ok: true, code: room.code });
+    broadcast(room);
   });
 
-  // L'hote lance la partie.
+  // Retour apres un rechargement de page / une coupure reseau.
+  socket.on('room:rejoin', ({ playerId, code }, cb) => {
+    const room = rooms.get(String(code || '').toUpperCase());
+    const player = room && validPlayerId(playerId) && room.players.find((p) => p.id === playerId);
+    if (!player) return cb({ ok: false });
+    attach(socket, room, player);
+    if (!room.players.some((p) => p.id === room.hostId && p.connected)) room.hostId = player.id;
+    cb({ ok: true, code: room.code });
+    broadcast(room);
+  });
+
+  // L'hote regle le jeu (Monde / France, nombre de manches) dans le salon.
+  socket.on('room:settings', ({ pool, rounds }) => {
+    const { room, player } = findRoomOf(socket);
+    if (!room || player.id !== room.hostId || room.state !== 'lobby') return;
+    if (pool === 'world' || pool === 'france') room.pool = pool;
+    if (ROUND_CHOICES.includes(rounds)) room.rounds = rounds;
+    broadcast(room);
+  });
+
   socket.on('game:start', () => {
-    const room = rooms.get(socket.data.roomCode);
-    if (!room || socket.id !== room.hostId) return;
-    if (room.players.length < 2) return;
-    if (room.state !== 'lobby' && room.state !== 'matchend') return;
-    startMatch(room, false);
+    const { room, player } = findRoomOf(socket);
+    if (!room || player.id !== room.hostId || room.state !== 'lobby') return;
+    if (room.players.filter((p) => p.connected).length < 2) return;
+    startGame(room);
+    broadcast(room);
   });
 
-  // Progression globale (0..1) relayee aux autres pour les barres.
-  socket.on('progress', ({ value }) => {
-    const room = rooms.get(socket.data.roomCode);
-    if (!room) return;
-    const p = room.players.find((x) => x.id === socket.id);
-    if (p) p.progress = Math.max(0, Math.min(1, value || 0));
-    socket.to(room.code).emit('opponent:progress', { id: socket.id, value: p ? p.progress : 0 });
+  socket.on('duel:pick', ({ choice }) => {
+    const { room, player } = findRoomOf(socket);
+    if (!room || room.state !== 'playing' || room.phase !== 'picking') return;
+    if (choice !== 0 && choice !== 1) return;
+    const cur = room.history[room.index];
+    if (cur.choices[player.id] !== undefined) return; // choix definitif
+    cur.choices[player.id] = choice;
+    maybeReveal(room);
+    broadcast(room);
   });
 
-  // Classique : un joueur a fini la grille de la manche -> il gagne la manche.
-  socket.on('round:done', () => {
-    const room = rooms.get(socket.data.roomCode);
-    if (!room || room.mode !== 'classic' || room.resolved || room.state !== 'playing') return;
-    room.resolved = true;
-    const winner = room.players.find((p) => p.id === socket.id);
-    if (winner) winner.score += 1;
-
-    const target = room.config.bestOf === 3 ? 2 : 1;
-    const matchOver = winner && winner.score >= target;
-
-    room.state = matchOver ? 'matchend' : 'roundend';
-    io.to(room.code).emit('round:result', {
-      winnerId: socket.id,
-      players: publicPlayers(room),
-      round: room.round,
-      matchOver: !!matchOver
-    });
-    if (matchOver) endMatch(room, socket.id);
+  socket.on('duel:next', () => {
+    const { room, player } = findRoomOf(socket);
+    if (!room || player.id !== room.hostId || room.state !== 'playing' || room.phase !== 'reveal') return;
+    if (room.index + 1 >= room.rounds) {
+      room.state = 'ended';
+    } else {
+      room.index += 1;
+      room.phase = 'picking';
+      maybeReveal(room);
+    }
+    broadcast(room);
   });
 
-  // Classique : l'hote enchaine la manche suivante.
-  socket.on('round:next', () => {
-    const room = rooms.get(socket.data.roomCode);
-    if (!room || socket.id !== room.hostId || room.mode !== 'classic') return;
-    if (room.state !== 'roundend') return;
-    startMatch(room, true);
-  });
-
-  // Rapide : un joueur a termine toute la sequence -> il gagne le match.
-  socket.on('match:done', () => {
-    const room = rooms.get(socket.data.roomCode);
-    if (!room || room.mode !== 'rapid' || room.resolved || room.state !== 'playing') return;
-    room.resolved = true;
-    const winner = room.players.find((p) => p.id === socket.id);
-    if (winner) winner.score += 1;
-    endMatch(room, socket.id);
-  });
-
-  // Rejouer : retour de tout le monde au salon avec le meme code.
+  // Rejouer : tout le monde revient au salon, meme code.
   socket.on('room:rematch', () => {
-    const room = rooms.get(socket.data.roomCode);
-    if (!room || socket.id !== room.hostId) return;
+    const { room, player } = findRoomOf(socket);
+    if (!room || player.id !== room.hostId || room.state !== 'ended') return;
     room.state = 'lobby';
-    room.round = 0;
-    room.sequence = [];
-    room.players.forEach((p) => { p.score = 0; p.progress = 0; p.done = false; });
-    io.to(room.code).emit('room:return', {
-      players: publicPlayers(room), mode: room.mode, config: room.config, hostId: room.hostId
-    });
+    room.history = [];
+    room.index = 0;
+    broadcast(room);
+  });
+
+  socket.on('room:leave', () => {
+    const { room, player } = findRoomOf(socket);
+    if (!room) return;
+    socket.leave(room.code);
+    socket.data.roomCode = null;
+    leave(room, player, true);
   });
 
   socket.on('disconnect', () => {
-    const room = rooms.get(socket.data.roomCode);
-    if (!room) return;
-    const player = room.players.find((p) => p.id === socket.id);
-    if (player) player.connected = false;
-    socket.to(room.code).emit('opponent:left', { id: socket.id });
-
-    // Tous deconnectes -> on supprime le salon.
-    if (room.players.every((p) => !p.connected)) {
-      rooms.delete(room.code);
-      return;
-    }
-    // Reattribution de l'hote si besoin.
-    if (room.hostId === socket.id) {
-      const next = room.players.find((p) => p.connected);
-      if (next) room.hostId = next.id;
-    }
-    io.to(room.code).emit('room:update', { players: publicPlayers(room), hostId: room.hostId });
+    const { room, player } = findRoomOf(socket);
+    if (!room || player.socketId !== socket.id) return;
+    leave(room, player, false);
   });
 });
 
+// Un joueur quitte (definitivement) ou se deconnecte (il pourra revenir).
+function leave(room, player, forever) {
+  player.connected = false;
+  player.socketId = null;
+  if (forever && room.state === 'lobby') room.players = room.players.filter((p) => p.id !== player.id);
+  if (room.hostId === player.id) {
+    const next = room.players.find((p) => p.connected);
+    if (next) room.hostId = next.id;
+  }
+  maybeReveal(room);
+  if (room.players.some((p) => p.connected)) broadcast(room);
+  else room.updatedAt = Date.now();
+}
+
+// Nettoyage des salons abandonnes.
+setInterval(() => {
+  const now = Date.now();
+  for (const [code, room] of rooms) {
+    if (!room.players.some((p) => p.connected) && now - room.updatedAt > 30 * 60e3) rooms.delete(code);
+  }
+}, 5 * 60e3).unref();
+
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Sudoku Duel en ecoute sur le port ${PORT}`);
+  console.log('Wiki Duel en ecoute sur le port ' + PORT +
+    ' (monde: ' + POOLS.world.length + ' pages, france: ' + POOLS.france.length + ', tier list: ' + TIERLIST_ITEMS.length + ')');
+  console.log('Historique : ' + (store.useSupabase ? 'Supabase' : 'fichier local (non permanent)'));
 });

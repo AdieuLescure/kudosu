@@ -1,11 +1,12 @@
 {
-  "name": "sudoku-duel",
+  "name": "wiki-duel",
   "version": "1.0.0",
-  "description": "Sudoku 1v1 en temps reel avec timer, IA et salons partageables",
+  "description": "Duels de pages Wikipedia entre amis et tier list des personnalites francaises",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "build-data": "node scripts/build-data.js"
   },
   "engines": {
     "node": ">=18"

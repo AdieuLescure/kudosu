@@ -1,184 +1,43 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <meta name="theme-color" content="#0f1115" />
-  <title>Sudoku Duel</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Wiki Duel</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%277%27 fill=%27%232f5bea%27/%3E%3Ctext x=%2716%27 y=%2723%27 font-size=%2720%27 font-weight=%27700%27 text-anchor=%27middle%27 fill=%27white%27 font-family=%27sans-serif%27%3EW%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
 </head>
-<body data-theme="sombre">
-
-  <!-- ====================== ACCUEIL ====================== -->
-  <main id="screen-home" class="screen active">
-    <div class="home-card">
-      <div class="home-head">
-        <h1 class="logo">Sudoku<span>Duel</span></h1>
-        <div class="head-actions">
-          <button id="btn-accent" class="icon-btn" title="Changer la couleur principale" aria-label="Couleur">
-            <span class="accent-dot"></span>
-          </button>
-          <button id="btn-theme" class="icon-btn" title="Clair / Sombre" aria-label="Thème">◐</button>
-        </div>
-      </div>
-      <p class="tagline">Le duel de grilles en temps reel.</p>
-
-      <label class="field">
-        <span>Pseudo</span>
-        <input id="pseudo" type="text" maxlength="16" placeholder="Ton nom..." autocomplete="off" />
-      </label>
-
-      <div class="cat-group">
-        <button class="cat-card" id="cat-classic">
-          <span class="cat-tag">CLASSIQUE</span>
-          <span class="cat-title">Sudoku 9×9</span>
-          <span class="cat-desc">Le grand classique. Choix de la difficulte.</span>
-        </button>
-        <button class="cat-card" id="cat-rapid">
-          <span class="cat-tag">JEUX RAPIDES</span>
-          <span class="cat-title">Queens · Tango · Zip · Sudoku 6×6</span>
-          <span class="cat-desc">Enchaine 3 ou 5 grilles. Le premier au bout gagne.</span>
-        </button>
-      </div>
-
-      <div class="join-block">
-        <span class="join-label">Rejoindre un salon</span>
-        <div class="join-row">
-          <input id="join-code" type="text" maxlength="5" placeholder="CODE" autocomplete="off" />
-          <button id="btn-join" class="btn">Rejoindre</button>
-        </div>
-      </div>
+<body>
+  <header class="top">
+    <a class="brand" href="#/">Wiki<span>Duel</span></a>
+    <nav id="nav">
+      <a href="#/duel" data-tab="duel">Duel</a>
+      <a href="#/tierlist" data-tab="tierlist">Tier list</a>
+      <a href="#/historique" data-tab="historique">Historique</a>
+    </nav>
+    <div class="who">
+      <span id="who-name"></span>
+      <button id="who-change" class="link" type="button">changer</button>
     </div>
-    <footer class="home-foot">Aucune installation. Partage juste le code du salon.</footer>
-  </main>
+  </header>
 
-  <!-- ====================== CONFIG CLASSIQUE ====================== -->
-  <main id="screen-config-classic" class="screen">
-    <div class="home-card">
-      <button class="back" data-back>&larr; Retour</button>
-      <h2>Sudoku classique</h2>
+  <main id="view"></main>
 
-      <div class="field">
-        <span>Difficulte</span>
-        <div class="segmented" id="difficulty" role="group">
-          <button class="seg" data-value="facile">Facile</button>
-          <button class="seg active" data-value="moyen">Moyen</button>
-          <button class="seg" data-value="difficile">Difficile</button>
-          <button class="seg" data-value="expert">Expert</button>
-        </div>
-      </div>
-
-      <div class="field">
-        <span>Format</span>
-        <div class="segmented" id="bestof" role="group">
-          <button class="seg active" data-value="1">1 manche</button>
-          <button class="seg" data-value="3">Premier a 2 manches</button>
-        </div>
-      </div>
-
-      <button class="btn btn-primary create-from" data-mode="classic">Creer le salon</button>
-    </div>
-  </main>
-
-  <!-- ====================== CONFIG JEUX RAPIDES ====================== -->
-  <main id="screen-config-rapid" class="screen">
-    <div class="home-card">
-      <button class="back" data-back>&larr; Retour</button>
-      <h2>Jeux rapides</h2>
-
-      <div class="field">
-        <span>Manche gagnante : grilles a terminer</span>
-        <div class="segmented" id="target" role="group">
-          <button class="seg active" data-value="3">3 grilles</button>
-          <button class="seg" data-value="5">5 grilles</button>
-        </div>
-      </div>
-
-      <div class="field">
-        <span>Jeux dans le tirage (touche pour activer/desactiver)</span>
-        <div class="game-toggles" id="game-toggles">
-          <button class="game-toggle active" data-game="queens">Queens</button>
-          <button class="game-toggle active" data-game="tango">Tango</button>
-          <button class="game-toggle active" data-game="zip">Zip</button>
-          <button class="game-toggle active" data-game="sudoku6">Sudoku 6×6</button>
-        </div>
-        <p class="hint" id="rapid-hint">Une grille est tiree au sort a chaque manche, sans repetition immediate.</p>
-      </div>
-
-      <button class="btn btn-primary create-from" data-mode="rapid">Creer le salon</button>
-    </div>
-  </main>
-
-  <!-- ====================== SALON ====================== -->
-  <main id="screen-lobby" class="screen">
-    <div class="home-card">
-      <button class="back" data-back>&larr; Quitter</button>
-      <h2>Salon</h2>
-      <div class="room-code-box">
-        <span class="rc-label">Code a partager</span>
-        <div class="rc-value" id="room-code">-----</div>
-        <button id="btn-copy" class="btn btn-small">Copier le code</button>
-      </div>
-      <p class="lobby-mode" id="lobby-mode"></p>
-      <div class="lobby-players" id="lobby-players"></div>
-      <p class="lobby-info" id="lobby-info">En attente de joueurs...</p>
-      <button id="btn-launch" class="btn btn-primary" disabled>Lancer la partie</button>
-    </div>
-  </main>
-
-  <!-- ====================== JEU ====================== -->
-  <main id="screen-game" class="screen">
-    <header class="game-top">
-      <div class="progress-wrap" id="progress-wrap"></div>
-      <div class="game-meta">
-        <div class="lead-banner" id="lead-banner">Pret ?</div>
-        <div class="meta-right">
-          <div class="timer" id="timer">00:00</div>
-          <div class="round-pill" id="round-pill"></div>
-        </div>
-      </div>
-    </header>
-
-    <div class="board-wrap">
-      <div id="board" class="board"></div>
-    </div>
-
-    <div class="game-controls" id="game-controls"></div>
-
-    <!-- Decompte de debut de partie -->
-    <div class="countdown-overlay" id="countdown-overlay">
-      <div class="cd-num" id="cd-num">3</div>
-    </div>
-
-    <!-- Blocage suite a une erreur -->
-    <div class="block-overlay" id="block-overlay">
-      <div class="block-card">
-        <div class="block-title">Erreur !</div>
-        <div class="block-num" id="block-num">5</div>
-        <div class="block-sub">Reprise dans quelques secondes...</div>
-      </div>
-    </div>
-  </main>
-
-  <!-- ====================== OVERLAY RESULTAT ====================== -->
-  <div id="overlay" class="overlay">
-    <div class="overlay-card">
-      <h2 id="ov-title">Manche terminee</h2>
-      <p id="ov-sub"></p>
-      <div id="ov-standings" class="ov-standings"></div>
-      <div class="ov-actions">
-        <button id="ov-next" class="btn btn-primary">Manche suivante</button>
-        <button id="ov-home" class="btn btn-ghost">Accueil</button>
-      </div>
-    </div>
+  <div id="gate" class="gate" hidden>
+    <form id="gate-form" class="gate-box" autocomplete="off">
+      <h1>Bienvenue !</h1>
+      <p>Comment tu t'appelles ? Ce pseudo sera visible par les autres joueurs.</p>
+      <input id="gate-input" type="text" maxlength="20" placeholder="Ton pseudo" required>
+      <button type="submit" class="btn primary">Entrer</button>
+    </form>
   </div>
-
-  <div id="toast" class="toast"></div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="app.js"></script>
+  <script src="duel.js"></script>
+  <script src="tierlist.js"></script>
+  <script src="history.js"></script>
+  <script>App.start();</script>
 </body>
 </html>
