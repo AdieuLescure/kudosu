@@ -139,10 +139,11 @@ async function vitalPeopleTitles() {
     action: 'query', list: 'allpages', apprefix: 'Vital articles/Level/4/People/', apnamespace: '4', aplimit: '100'
   });
   const pages = list.query.allpages.map((p) => p.title).filter((t) => !/Candidates|Removed|Draft|alerts/i.test(t));
+  log('  ' + pages.length + ' pages de liste');
   const titles = new Set();
   for (const page of pages) {
-    const json = await cached('parse:' + page, async () => {
-      const r = await api('en.wikipedia.org', { action: 'parse', page, prop: 'wikitext' });
+    const json = await cached('parse2:' + page, async () => {
+      const r = await api('en.wikipedia.org', { action: 'parse', page, prop: 'wikitext', redirects: '1' });
       await sleep(1000);
       return r.parse.wikitext;
     });
@@ -263,6 +264,10 @@ function attach(rows, resolved, type) {
   return out;
 }
 
+// Personnes qui ont (aussi) la nationalite francaise dans Wikidata mais qu'on ne
+// presente pas comme "personnalites francaises".
+const NOT_FRENCH = new Set(['George Clooney', 'Salma Hayek']);
+
 function dedupe(items) {
   const seen = new Set();
   return items.filter((it) => (seen.has(it.id) ? false : seen.add(it.id)));
@@ -292,7 +297,7 @@ async function main() {
   const wEventRes = await resolveQids([...new Set(wEventRows.map((r) => r.qid))]);
   const vitalRes = await resolveEnTitles(vital);
 
-  const frPeople = attach(frPeopleRows, frPeopleRes, 'person');
+  const frPeople = attach(frPeopleRows, frPeopleRes, 'person').filter((p) => !NOT_FRENCH.has(p.title));
   const frEvents = attach(frEventRows, frEventRes, 'event');
   const wEvents = attach(wEventRows, wEventRes, 'event');
   const wPeople = Object.values(vitalRes).map((r) => ({ id: r.id, title: r.title, desc: r.desc, type: 'person', n: 0 }));
