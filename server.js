@@ -9,7 +9,7 @@
  *            seul, sans limite de temps, puis enregistrees dans l'historique.
  *
  *  Les pages viennent de data/*.json (construits par scripts/build-data.js,
- *  uniquement des pages a 10000+ vues/mois).
+ *  uniquement des pages a 20000+ vues/mois).
  * ========================================================================== */
 
 const path = require('path');
@@ -25,7 +25,7 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 const DATA = process.env.DATA_DIR || path.join(__dirname, 'data');
-const MIN_VIEWS = 10000;
+const MIN_VIEWS = 20000;
 
 function loadPool(name) {
   try {

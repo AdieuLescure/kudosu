@@ -22,7 +22,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const MIN_VIEWS = 10000;
+const MIN_VIEWS = 20000;
 const TIERLIST_SIZE = 50;
 const UA = process.env.WIKI_USER_AGENT || 'WikiDuel/1.0 (https://github.com/adieulescure/kudosu)';
 const ROOT = path.join(__dirname, '..');

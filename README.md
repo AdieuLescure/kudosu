@@ -1,7 +1,7 @@
 # Wiki Duel
 
 Deux jeux à faire entre amis, basés sur des pages Wikipedia très consultées
-(**plus de 10 000 vues par mois** sur fr.wikipedia, via l'API Wikimedia).
+(**plus de 20 000 vues par mois** sur fr.wikipedia, via l'API Wikimedia).
 
 On te demande un **pseudo** en arrivant sur le site.
 
@@ -53,7 +53,7 @@ Le script (`scripts/build-data.js`) :
 1. récupère des candidats : événements (Wikidata), personnalités françaises
    (Wikidata), personnalités mondiales (articles « vitaux » de Wikipedia) ;
 2. interroge l'API Wikimedia pour les **vues des 30 derniers jours** sur
-   fr.wikipedia et ne garde que les pages à **10 000 vues/mois ou plus** ;
+   fr.wikipedia et ne garde que les pages à **20 000 vues/mois ou plus** ;
 3. choisit pour la tier list les 50 personnalités françaises présentes dans le
    plus de langues Wikipedia (avec photo).
 

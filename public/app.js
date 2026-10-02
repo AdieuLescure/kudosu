@@ -104,7 +104,7 @@
       view.append(
         h('section', { class: 'hero' },
           h('h1', {}, 'Deux jeux, un seul site.'),
-          h('p', {}, 'Des pages Wikipedia très consultées (plus de 10 000 vues par mois), à jouer entre amis.')),
+          h('p', {}, 'Des pages Wikipedia très consultées (plus de 20 000 vues par mois), à jouer entre amis.')),
         h('div', { class: 'tiles' },
           h('a', { class: 'tile', href: '#/duel' },
             h('h2', {}, 'Duel'),
